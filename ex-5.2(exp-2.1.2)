@@ -1,0 +1,80 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const app = express();
+app.use(express.json());
+
+// ByteXL MongoDB connection string
+const MONGO_URI = 'mongodb://user_442sqnvm3:p442sqnvm3@bytexldb.com:5050/db_442sqnvm3';
+
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((err) => console.error('MongoDB connection error:', err));
+
+// --- Student Model ---
+const studentSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  age: { type: Number, required: true },
+  course: { type: String, required: true }
+});
+const Student = mongoose.model('Student', studentSchema);
+
+// --- Controller Logic as Functions ---
+// CREATE
+app.post('/students', async (req, res) => {
+  try {
+    const { name, age, course } = req.body;
+    const student = new Student({ name, age, course });
+    await student.save();
+    res.status(201).json(student);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// READ ALL
+app.get('/students', async (req, res) => {
+  const students = await Student.find();
+  res.status(200).json(students);
+});
+
+// READ ONE
+app.get('/students/:id', async (req, res) => {
+  try {
+    const student = await Student.findById(req.params.id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.status(200).json(student);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// UPDATE (not shown in your images, but commonly included)
+app.put('/students/:id', async (req, res) => {
+  try {
+    const { name, age, course } = req.body;
+    const student = await Student.findByIdAndUpdate(
+      req.params.id, { name, age, course }, { new: true, runValidators: true }
+    );
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.status(200).json(student);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// DELETE
+app.delete('/students/:id', async (req, res) => {
+  try {
+    const student = await Student.findByIdAndDelete(req.params.id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.status(200).json({ message: 'Student deleted.', student });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+

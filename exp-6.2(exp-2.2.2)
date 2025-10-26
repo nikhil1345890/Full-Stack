@@ -1,0 +1,62 @@
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const app = express();
+
+app.use(express.json());
+
+const USER = { username: 'user1', password: 'password123' };
+const JWT_SECRET = 'your_jwt_secret_123';
+let balance = 1000;
+
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === USER.username && password === USER.password) {
+    const token = jwt.sign({ username: USER.username }, JWT_SECRET, { expiresIn: '1h' });
+    res.status(200).json({ token });
+  } else {
+    res.status(401).json({ message: 'Invalid credentials' });
+  }
+});
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(403).json({ message: 'Invalid or expired token' });
+  }
+  const token = authHeader.split(' ')[1];
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid or expired token' });
+    req.user = user;
+    next();
+  });
+}
+
+app.get('/balance', authenticateToken, (req, res) => {
+  res.status(200).json({ balance: balance });
+});
+
+app.post('/deposit', authenticateToken, (req, res) => {
+  const { amount } = req.body;
+  if (typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({ message: 'Invalid deposit amount' });
+  }
+  balance += amount;
+  res.status(200).json({ message: `Deposited $${amount}`, newBalance: balance });
+});
+
+app.post('/withdraw', authenticateToken, (req, res) => {
+  const { amount } = req.body;
+  if (typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({ message: 'Invalid withdraw amount' });
+  }
+  if (amount > balance) {
+    return res.status(400).json({ message: 'Insufficient balance' });
+  }
+  balance -= amount;
+  res.status(200).json({ message: `Withdraw $${amount}`, newBalance: balance });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});

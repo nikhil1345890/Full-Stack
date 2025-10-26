@@ -1,0 +1,155 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const messages = [];
+
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(htmlPage());
+});
+
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+io.on('connection', (socket) => {
+  socket.emit('init', messages);
+  socket.on('join', (name) => {
+    socket.data.name = name || 'Anonymous';
+    socket.broadcast.emit('system', { text: `${socket.data.name} joined.`, timeISO: new Date().toISOString() });
+  });
+  socket.on('message', (payload) => {
+    if (!payload || !payload.text) return;
+    const msg = {
+      id: generateId(),
+      name: payload.name || socket.data.name || 'Anonymous',
+      text: String(payload.text).slice(0, 1000),
+      timeISO: new Date().toISOString(),
+    };
+    messages.push(msg);
+    if (messages.length > 200) messages.shift();
+    io.emit('message', msg);
+  });
+  socket.on('disconnect', () => {
+    const nm = socket.data.name;
+    if (nm) io.emit('system', { text: `${nm} left.`, timeISO: new Date().toISOString() });
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
+function generateId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function htmlPage() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Real-Time Chat (Socket.io)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: Inter, system-ui; background:#f5f7fb; margin:0; padding:24px; }
+  .container { max-width: 980px; margin: 0 auto; display:flex; gap:20px; align-items:flex-start; }
+  .panel { background: #fff; border:1px solid #222; padding:16px; width:48%; box-sizing:border-box; border-radius:6px; min-height:520px; }
+  h2 { text-align:center; margin:0 0 14px; font-size:20px; font-weight:700; }
+  .nameInput { width:100%; padding:10px 12px; font-size:14px; margin-bottom:10px; border:1px solid #ddd; border-radius:4px; }
+  .messages { height:360px; overflow:auto; border:1px solid #ddd; padding:12px; border-radius:4px; background:#fafafa; }
+  .msg { margin-bottom:8px; }
+  .msg b { margin-right:6px; }
+  .system { color:#555; font-style:italic; margin-bottom:8px; }
+  .inputRow { display:flex; gap:10px; margin-top:12px; }
+  .textInput { flex:1; padding:10px; border-radius:4px; border:1px solid #ddd; font-size:14px; }
+  .sendBtn { background:#0d6efd; color:white; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; }
+  .sendBtn:disabled { opacity:0.6; cursor:not-allowed; }
+  .meta { font-size:12px; color:#666; margin-bottom:8px; }
+  .timestamp { color:#888; font-size:12px; margin-left:6px; }
+  .muted { color:#999; font-size:13px; }
+  footer.small { margin-top:16px; text-align:center; color:#666; font-size:13px; }
+  @media (max-width:900px){ .container{flex-direction:column} .panel{width:100%} }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    function formatTime(iso) {
+      const d = new Date(iso);
+      const hh = String(d.getHours()).padStart(2,'0');
+      const mm = String(d.getMinutes()).padStart(2,'0');
+      const ss = String(d.getSeconds()).padStart(2,'0');
+      return \`\${hh}:\${mm}:\${ss}\`;
+    }
+    function ChatPanel({ title, socket, initialName }) {
+      const [name, setName] = useState(initialName || '');
+      const [message, setMessage] = useState('');
+      const [messages, setMessages] = useState([]);
+      const messagesRef = useRef(null);
+      useEffect(() => {
+        if (!socket) return;
+        socket.on('init', (msgs) => { setMessages(msgs || []); scrollToBottom(); });
+        socket.on('message', (msg) => { setMessages(prev => [...prev, msg]); scrollToBottom(); });
+        socket.on('system', (sys) => { setMessages(prev => [...prev, { id: 'sys-'+Math.random().toString(36).slice(3), name: '__SYS__', text: sys.text, timeISO: sys.timeISO } ]); scrollToBottom(); });
+        return () => { socket.off('init'); socket.off('message'); socket.off('system'); };
+      }, [socket]);
+      function scrollToBottom() { setTimeout(() => { if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight; }, 30); }
+      function sendMessage() {
+        const cleanName = (name || 'Anonymous').trim();
+        const text = (message || '').trim();
+        if (!text) return;
+        socket.emit('message', { name: cleanName, text });
+        setMessage('');
+      }
+      function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+      function joinIfNeeded() { if (socket && name) socket.emit('join', name); }
+      useEffect(() => { joinIfNeeded(); }, [name]);
+      return (
+        <div className="panel">
+          <h2>Real-Time Chat</h2>
+          <input className="nameInput" placeholder="Type your name" value={name} onChange={e => setName(e.target.value)} onBlur={joinIfNeeded}/>
+          <div className="messages" ref={messagesRef}>
+            {messages.length === 0 && <div className="muted">No messages yet. Say hi 👋</div>}
+            {messages.map(m => (
+              m.name === '__SYS__'
+                ? <div key={m.id} className="system">· {m.text} <span className="timestamp">{formatTime(m.timeISO)}</span></div>
+                : <div key={m.id} className="msg"><b>{m.name}</b><span className="timestamp">[{formatTime(m.timeISO)}]</span><div style={{marginTop:4}}>{m.text}</div></div>
+            ))}
+          </div>
+          <div style={{marginTop:10}} className="meta">Connected as: <strong>{name || 'Anonymous'}</strong></div>
+          <div className="inputRow">
+            <input className="textInput" placeholder="Type your message..." value={message} onChange={e => setMessage(e.target.value)} onKeyDown={handleKey}/>
+            <button className="sendBtn" onClick={sendMessage} disabled={!message.trim()}>Send</button>
+          </div>
+        </div>
+      );
+    }
+    function App() {
+      const [socket, setSocket] = useState(null);
+      useEffect(() => { const s = window.io(); setSocket(s); return () => s.close(); }, []);
+      const [socket2, setSocket2] = useState(null);
+      useEffect(() => { const s2 = window.io(); setSocket2(s2); return () => s2.close(); }, []);
+      return (
+        <div>
+          <div className="container">
+            <div style={{width:'48%'}}>{socket ? <ChatPanel socket={socket} initialName="Alice"/> : <div>Connecting...</div>}</div>
+            <div style={{width:'48%'}}>{socket2 ? <ChatPanel socket={socket2} initialName="Bob"/> : <div>Connecting...</div>}</div>
+          </div>
+          <footer className="small">Open multiple browser tabs to test real-time messaging.</footer>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>`;
+}
